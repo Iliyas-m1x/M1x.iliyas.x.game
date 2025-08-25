@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Neon Dodge — HTML/CSS/JS Game</title>
+    <meta name="description" content="">
+  <!-- Keyword  -->
+      <meta name="keywords" content="M1X.ILIYAS, M1X.Game, Free Fire,PGMI, m1x, PUBG, Holy , NEW GAME">
+      <!-- Name -->
+       <meta name="author" content="Ali Brother's , M1X.ILIYAS">
+       <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="aurora"></div>
+
+  <canvas id="game"></canvas>
+
+  <div class="hud">
+   <div class="card"><span class="badge">Score:</span> <span id="score">0</span></div>
+    <div class="card"><span class="badge">Best:</span> <span id="best">0</span></div>
+    <button id="toggle" class="btn" aria-label="Pause or Resume">⏸️ Pause</button>
+    <audio src="m1xali.mp3"></audio>
+    <button id="sound" class="btn" aria-label="Toggle Sound">🔊 Sound</button>
+    <button id="restart" class="btn primary" aria-label="Restart">🔁 Restart</button>
+  </div>
+
+  <div class="center" id="overlay">
+    <div class="panel card">
+      <h1 class="title">M1X / GAME </h1>
+      <p class="subtitle">Drag your orb (mouse or finger) to collect <b style="color:var(--good)">green shards</b> and avoid <b style="color:var(--danger)">pink spikes</b>.
+        Survive as long as you can. Good luck!</p>
+      <div class="stack">
+        <button id="play" class="btn primary">▶️ Play</button>
+        <button id="how" class="btn">❔ How to play</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="hint">Tip: On mobile, just move your finger — the orb follows you.</div>
+
+  <div class="toast hidden" id="toast"><div class="card" id="toastMsg">Achievement Unlocked!</div></div>
+
+  <div class="cursor" id="cursor"></div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  let W = 0, H = 0;
+  const resize = () => {
+    W = canvas.width = Math.floor(innerWidth * dpr);
+    H = canvas.height = Math.floor(innerHeight * dpr);
+    canvas.style.width = innerWidth + 'px';
+    canvas.style.height = innerHeight + 'px';
+  };
+  addEventListener('resize', resize, {passive:true});
+  resize();
+
+  // UI refs
+  const scoreEl = document.getElementById('score');
+  const bestEl = document.getElementById('best');
+  const toggleBtn = document.getElementById('toggle');
+  const soundBtn = document.getElementById('sound');
+  const restartBtn = document.getElementById('restart');
+  const overlay = document.getElementById('overlay');
+  const playBtn = document.getElementById('play');
+  const howBtn = document.getElementById('how');
+  const toast = document.getElementById('toast');
+  const toastMsg = document.getElementById('toastMsg');
+  const cursor = document.getElementById('cursor');
+
+  // Local storage best score
+  const BEST_KEY = 'neon_dodge_best_v1';
+  let best = Number(localStorage.getItem(BEST_KEY) || 0);
+  bestEl.textContent = best;
+
+  // Simple audio (no external files)
+  let audioEnabled = true; let ac, master;
+  function initAudio(){
+    if (ac) return; try{
+      ac = new (window.AudioContext || window.webkitAudioContext)();
+      master = ac.createGain(); master.gain.value = 0.15; master.connect(ac.destination);
+    }catch(e){ audioEnabled = false; soundBtn.textContent = '🔇 No Audio'; soundBtn.disabled = true; }
+  }
+  function beep(type='square', freq=440, dur=0.08){ if(!audioEnabled||!ac) return;
+    const o = ac.createOscillator(); const g = ac.createGain();
+    o.type = type; o.frequency.value = freq; g.gain.setValueAtTime(0.0001, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.4, ac.currentTime + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + dur);
+    o.connect(g); g.connect(master); o.start(); o.stop(ac.currentTime + dur);
+  }
+
+  // Input tracking
+  const input = { x: W/2, y: H/2, active:false };
+  const setInput = (x,y)=>{ input.x = x*dpr; input.y = y*dpr; };
+  addEventListener('pointerdown', e=>{ initAudio(); input.active=true; setInput(e.clientX,e.clientY); });
+  addEventListener('pointermove', e=>{ setInput(e.clientX,e.clientY); cursor.style.transform = `translate(${e.clientX-7}px, ${e.clientY-7}px)`; });
+  addEventListener('pointerup',   ()=> input.active=false);
+  addEventListener('mouseleave',  ()=> input.active=false);
+
+  // Game objects
+  class Orb{ constructor(){ this.r = 14*dpr; this.x = W/2; this.y = H/2; this.vx=0; this.vy=0; this.maxSpd=9*dpr; this.tail=[]; }
+    update(){ const ax = (input.x-this.x)*0.12, ay=(input.y-this.y)*0.12; this.vx = (this.vx+ax)*0.9; this.vy=(this.vy+ay)*0.9; const spd=Math.hypot(this.vx,this.vy); if(spd>this.maxSpd){ this.vx*=this.maxSpd/spd; this.vy*=this.maxSpd/spd; } this.x+=this.vx; this.y+=this.vy; this.tail.push({x:this.x,y:this.y}); if(this.tail.length>20) this.tail.shift(); }
+    draw(){
+      // trail
+      for(let i=0;i<this.tail.length;i++){
+        const p = this.tail[i]; const t = i/this.tail.length; const r = this.r*(0.5+0.6*t);
+        const grd = ctx.createRadialGradient(p.x,p.y,r*0.2, p.x,p.y,r);
+        grd.addColorStop(0, 'rgba(62,241,255,.9)');
+        grd.addColorStop(1, 'rgba(62,241,255,0)');
+        ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(p.x,p.y,r,0,Math.PI*2); ctx.fill();
+      }
+      // core
+      const r = this.r; const grd = ctx.createRadialGradient(this.x,this.y,r*0.1, this.x,this.y,r);
+      grd.addColorStop(0,'#ffffff'); grd.addColorStop(1,'#3ef1ff22');
+      ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(this.x,this.y,r,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle = '#3ef1ff'; ctx.lineWidth = 2*dpr; ctx.shadowBlur = 12*dpr; ctx.shadowColor = '#3ef1ff';
+      ctx.beginPath(); ctx.arc(this.x,this.y,r*1.05,0,Math.PI*2); ctx.stroke(); ctx.shadowBlur=0;
+    }
+  }
+
+  class Shard{ constructor(){ this.r = 10*dpr; this.x = Math.random()*W; this.y = -20*dpr; this.vy = (2+Math.random()*2)*dpr; this.life=8*60; }
+    update(){ this.y += this.vy; this.life--; }
+    draw(){ ctx.fillStyle = '#7cff6b'; ctx.beginPath(); ctx.arc(this.x,this.y,this.r,0,Math.PI*2); ctx.fill(); ctx.shadowColor='#7cff6b'; ctx.shadowBlur=16*dpr; ctx.fill(); ctx.shadowBlur=0; }
+  }
+
+  class Spike{ constructor(){ this.r = 14*dpr; this.x = Math.random()*W; this.y = -20*dpr; this.vy = (3+Math.random()*3)*dpr; this.vx = (Math.random()*2-1)*dpr; }
+    update(){ this.y += this.vy; this.x += this.vx; }
+    draw(){ ctx.fillStyle = '#ff4971'; ctx.beginPath(); for(let i=0;i<5;i++){ const a = i*(Math.PI*2/5); const rx = this.r*Math.cos(a), ry=this.r*Math.sin(a); ctx.lineTo(this.x+rx, this.y+ry); } ctx.closePath(); ctx.fill(); ctx.shadowColor='#ff4971'; ctx.shadowBlur=14*dpr; ctx.fill(); ctx.shadowBlur=0; }
+  }
+
+  // Particles for pops
+  const particles=[];
+  function spawnBurst(x,y,col){ for(let i=0;i<16;i++){ particles.push({x,y, vx:(Math.random()*2-1)*6*dpr, vy:(Math.random()*2-1)*6*dpr, life:30, col}); } }
+  function updateParticles(){ for(let i=particles.length-1;i>=0;i--){ const p=particles[i]; p.x+=p.vx; p.y+=p.vy; p.vx*=0.96; p.vy*=0.96; p.life--; if(p.life<=0) particles.splice(i,1); } }
+  function drawParticles(){ particles.forEach(p=>{ ctx.globalAlpha = Math.max(0, p.life/30); ctx.fillStyle = p.col; ctx.beginPath(); ctx.arc(p.x,p.y, 3*dpr, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1; }); }
+
+  // Game state
+  const player = new Orb();
+  let shards=[], spikes=[]; let frame=0; let running=false; let score=0; let gameOver=false;
+
+  function reset(){ shards.length=0; spikes.length=0; particles.length=0; frame=0; score=0; scoreEl.textContent=0; player.x=W/2; player.y=H/2; player.vx=player.vy=0; gameOver=false; overlay.style.display='grid'; }
+
+  function spawn(){
+    if(frame%45===0) shards.push(new Shard());
+    if(frame%60===0) spikes.push(new Spike());
+    // difficulty ramp
+    if(frame%600===0 && frame>0){
+      showToast('Level Up! ✨');
+      shards.push(new Shard()); spikes.push(new Spike());
+    }
+  }
+
+  function collide(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return dx*dx+dy*dy < (a.r+b.r)*(a.r+b.r); }
+
+  function drawBackground(){
+    // vignette
+    const g = ctx.createRadialGradient(W/2,H/2,Math.min(W,H)*0.2, W/2,H/2, Math.max(W,H)*0.7);
+    g.addColorStop(0, 'rgba(255,255,255,0.02)'); g.addColorStop(1, 'rgba(0,0,0,0.6)');
+    ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+
+    // scanlines
+    ctx.globalAlpha = 0.04; ctx.fillStyle = '#ffffff';
+    for(let y=0;y<H;y+=4*dpr){ ctx.fillRect(0,y,W,1*dpr); }
+    ctx.globalAlpha = 1;
+  }
+
+  function loop(){
+    if(running){
+      ctx.clearRect(0,0,W,H);
+      drawBackground();
+      frame++;
+      player.update();
+      spawn();
+
+      // update / draw shards
+      for(let i=shards.length-1;i>=0;i--){ const s=shards[i]; s.update(); s.draw();
+        if(collide(player,s)){ shards.splice(i,1); score+=10; scoreEl.textContent=score; beep('sine', 760, 0.06); spawnBurst(s.x,s.y,'#7cff6b'); }
+        else if(s.y>H+40*dpr || s.life<=0) shards.splice(i,1);
+      }
+      // update / draw spikes
+      for(let i=spikes.length-1;i>=0;i--){ const s=spikes[i]; s.update(); s.draw();
+        if(collide(player,s)){ spikes.splice(i,1); spawnBurst(s.x,s.y,'#ff4971'); endGame(); break; }
+        else if(s.y>H+40*dpr) spikes.splice(i,1);
+      }
+
+      // particles & player
+      updateParticles(); drawParticles();
+      player.draw();
+    }
+    requestAnimationFrame(loop);
+  }
+  loop();
+
+  function endGame(){ if(gameOver) return; gameOver=true; running=false; toggleBtn.textContent='▶️ Resume'; beep('square', 220, .25); showToast('Game Over!');
+    best = Math.max(best, score); bestEl.textContent = best; localStorage.setItem(BEST_KEY, String(best));
+    setTimeout(()=>{ overlay.style.display='grid'; }, 600);
+  }
+
+  function pause(){ if(!running) return; running=false; toggleBtn.textContent='▶️ Resume'; showToast('Paused ⏸️'); }
+  function resume(){ if(running) return; overlay.style.display='none'; running=true; toggleBtn.textContent='⏸️ Pause'; initAudio(); showToast('Go! 🚀'); }
+
+  // UI handlers
+  playBtn.onclick = ()=>{ reset(); resume(); };
+  howBtn.onclick = ()=>{
+    alert('How to play\n\n• Move your mouse or finger — the orb follows.\n• Collect green shards (+10).\n• Avoid pink spikes — one hit ends the run.\n• Try to beat your Best score!');
+  };
+  toggleBtn.onclick = ()=> running ? pause() : resume();
+  soundBtn.onclick = ()=>{ if(!ac){initAudio();} audioEnabled = !audioEnabled; soundBtn.textContent = audioEnabled ? '🔊 Sound' : '🔇 Muted'; if(ac && ac.state==='suspended' && audioEnabled) ac.resume(); };
+  restartBtn.onclick = ()=>{ reset(); resume(); };
+
+  // Start state
+  reset();
+
+  // Pretty cursor hide on touch devices
+  const touchDevice = matchMedia('(pointer: coarse)').matches;
+  if(touchDevice) cursor.style.display='none';
+
+  // Toast helper
+  let toastTimer; function showToast(msg){ clearTimeout(toastTimer); toastMsg.textContent = msg; toast.classList.remove('hidden'); toastTimer = setTimeout(()=>toast.classList.add('hidden'), 1400); }
+})();
+</script>
+</body>
+</html>
